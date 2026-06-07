@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CoH3 Weapon Stats Viewer</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="page-header">
+        <div class="page-header-text">
+          <h1>CoH3 Weapon Stats Viewer</h1>
+          <p>Search, filter, and sort weapon stats from <code>weapon.json</code>.</p>
+        </div>
+        <div class="page-header-toolbar">
+          <button
+            type="button"
+            class="drawer-trigger"
+            data-drawer-panel="attributes"
+            aria-expanded="false"
+            aria-controls="topDrawerAttributes"
+          >
+            Attribute selector
+          </button>
+          <button
+            type="button"
+            class="drawer-trigger"
+            data-drawer-panel="column-order"
+            aria-expanded="false"
+            aria-controls="topDrawerColumnOrder"
+          >
+            Attribute order
+          </button>
+          <button
+            type="button"
+            class="drawer-trigger"
+            data-drawer-panel="filters"
+            aria-expanded="false"
+            aria-controls="topDrawerFilters"
+          >
+            Advanced filters
+          </button>
+          <button
+            type="button"
+            class="drawer-trigger"
+            data-drawer-panel="calculated"
+            aria-expanded="false"
+            aria-controls="topDrawerCalculated"
+          >
+            Calculated attributes
+          </button>
+          <button id="exportCsvBtn" type="button">Export CSV</button>
+        </div>
+      </header>
+
+      <dialog id="managePresetsDialog" class="preset-manage-dialog">
+        <div class="preset-manage-dialog-header">
+          <h3>Manage presets</h3>
+          <button id="closeManagePresetsBtn" type="button">Close</button>
+        </div>
+        <div class="preset-manage-table-wrap">
+          <table class="preset-manage-table">
+            <colgroup>
+              <col class="preset-col-name" />
+              <col class="preset-col-actions" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>Preset name</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="presetManageTableBody"></tbody>
+          </table>
+        </div>
+      </dialog>
+
+      <section class="controls">
+        <label>
+          Search
+          <input id="searchInput" type="text" placeholder="weapon name or path..." />
+        </label>
+
+        <label>
+          Faction
+          <select id="factionFilter">
+            <option value="">All factions</option>
+          </select>
+        </label>
+
+        <label>
+          Category
+          <select id="categoryFilter">
+            <option value="">All categories</option>
+          </select>
+        </label>
+
+        <label>
+          Rows per page
+          <select id="rowsPerPage">
+            <option value="25">25</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+            <option value="250">250</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="status-bar">
+        <div id="statusText">Loading data...</div>
+        <div class="page-controls">
+          <button id="prevPageBtn" type="button">Prev</button>
+          <span id="pageText">Page 1 / 1</span>
+          <button id="nextPageBtn" type="button">Next</button>
+        </div>
+      </section>
+
+      <section class="table-wrap" id="tableWrap">
+        <table id="statsTable">
+          <thead></thead>
+          <tbody id="pinnedTableBody" class="pinned-rows"></tbody>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <div id="topDrawerBackdrop" class="top-drawer-backdrop" aria-hidden="true"></div>
+
+    <div id="topDrawerAttributes" class="top-drawer" data-drawer-panel="attributes" role="dialog" aria-modal="true" aria-labelledby="topDrawerAttributesTitle" aria-hidden="true">
+      <div class="top-drawer-inner">
+        <section class="attribute-controls drawer-panel-section">
+          <div class="attribute-toolbar">
+            <h3 id="topDrawerAttributesTitle" class="attribute-toolbar-title">Attributes</h3>
+            <div class="attribute-toolbar-actions">
+              <button id="showAllAttributesBtn" type="button">Show all</button>
+              <button id="clearAttributesBtn" type="button">Clear</button>
+              <button id="expandAllGroupsBtn" type="button">Expand all</button>
+              <button id="collapseAllGroupsBtn" type="button">Collapse all</button>
+            </div>
+            <input
+              id="attributeSearchInput"
+              class="attribute-toolbar-search"
+              type="text"
+              placeholder="Find attributes..."
+              aria-label="Find attributes"
+            />
+            <div class="attribute-toolbar-presets">
+              <span class="attribute-toolbar-presets-label">Presets</span>
+              <select id="presetSelect" aria-label="Preset"></select>
+              <button id="savePresetBtn" type="button">Save preset</button>
+              <button id="managePresetsBtn" type="button">Manage presets</button>
+            </div>
+          </div>
+          <div class="attribute-chooser-wrap">
+            <table class="attribute-chooser-table">
+              <thead>
+                <tr>
+                  <th class="attribute-col-group">Group</th>
+                  <th class="attribute-col-items">Attributes</th>
+                </tr>
+              </thead>
+              <tbody id="attributeChooserBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div id="topDrawerColumnOrder" class="top-drawer" data-drawer-panel="column-order" role="dialog" aria-modal="true" aria-labelledby="topDrawerColumnOrderTitle" aria-hidden="true">
+      <div class="top-drawer-inner">
+        <section class="column-order-controls drawer-panel-section">
+          <div class="attribute-toolbar column-order-toolbar">
+            <div class="column-order-toolbar-row">
+              <h3 id="topDrawerColumnOrderTitle" class="attribute-toolbar-title">Attribute order</h3>
+              <div class="attribute-toolbar-actions">
+                <button id="expandColumnOrderGroupsBtn" type="button">Expand all</button>
+                <button id="collapseColumnOrderGroupsBtn" type="button">Collapse all</button>
+                <button id="resetColumnOrderBtn" type="button">Reset</button>
+              </div>
+            </div>
+            <p class="column-order-hint">Drag attributes or groups to reorder columns. Groups follow the same shared-prefix layout as the stats table header. Reset restores the default column order.</p>
+          </div>
+          <div class="column-order-list-wrap">
+            <ul id="columnOrderList" class="column-order-list" aria-label="Visible attribute order"></ul>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div id="topDrawerFilters" class="top-drawer" data-drawer-panel="filters" role="dialog" aria-modal="true" aria-labelledby="topDrawerFiltersTitle" aria-hidden="true">
+      <div class="top-drawer-inner">
+        <section class="filter-controls drawer-panel-section">
+          <div class="attribute-toolbar filter-toolbar">
+            <h3 id="topDrawerFiltersTitle" class="attribute-toolbar-title">Advanced filters</h3>
+            <div class="attribute-toolbar-actions">
+              <button id="addFilterBtn" type="button">Add filter</button>
+              <button id="activateAllFiltersBtn" type="button">Activate all</button>
+              <button id="deactivateAllFiltersBtn" type="button">Deactivate all</button>
+            </div>
+            <div class="attribute-toolbar-presets">
+              <span class="attribute-toolbar-presets-label">Presets</span>
+              <select id="filterPresetSelect" aria-label="Filter preset"></select>
+              <button id="saveFilterPresetBtn" type="button">Save preset</button>
+              <button id="manageFilterPresetsBtn" type="button">Manage presets</button>
+            </div>
+          </div>
+          <div class="attribute-chooser-wrap filter-table-wrap">
+            <table class="attribute-chooser-table filter-table">
+              <thead>
+                <tr>
+                  <th class="filter-col-active">Active</th>
+                  <th class="filter-col-definition">Filter</th>
+                </tr>
+              </thead>
+              <tbody id="filterTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <dialog id="manageFilterPresetsDialog" class="preset-manage-dialog">
+      <div class="preset-manage-dialog-header">
+        <h3>Manage filter presets</h3>
+        <button id="closeManageFilterPresetsBtn" type="button">Close</button>
+      </div>
+      <div class="preset-manage-table-wrap">
+        <table class="preset-manage-table">
+          <colgroup>
+            <col class="preset-col-name" />
+            <col class="preset-col-actions" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Preset name</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="filterPresetManageTableBody"></tbody>
+        </table>
+      </div>
+    </dialog>
+
+    <div id="topDrawerCalculated" class="top-drawer" data-drawer-panel="calculated" role="dialog" aria-modal="true" aria-labelledby="topDrawerCalculatedTitle" aria-hidden="true">
+      <div class="top-drawer-inner">
+        <section class="calc-controls drawer-panel-section">
+          <div class="attribute-toolbar calc-toolbar">
+            <h3 id="topDrawerCalculatedTitle" class="attribute-toolbar-title">Calculated attributes</h3>
+            <div class="attribute-toolbar-actions">
+              <button id="addCalcColumnBtn" type="button">Add calculated attribute</button>
+              <button id="displayAllCalcBtn" type="button">Display all</button>
+              <button id="clearCalcColumnsBtn" type="button">Clear</button>
+            </div>
+            <div class="attribute-toolbar-presets">
+              <span class="attribute-toolbar-presets-label">Presets</span>
+              <select id="calcPresetSelect" aria-label="Calculated attribute preset"></select>
+              <button id="saveCalcPresetBtn" type="button">Save preset</button>
+              <button id="manageCalcPresetsBtn" type="button">Manage presets</button>
+            </div>
+          </div>
+          <div class="attribute-chooser-wrap calc-table-wrap">
+            <table class="attribute-chooser-table filter-table calc-table">
+              <thead>
+                <tr>
+                  <th class="filter-col-active">Active</th>
+                  <th class="calc-col-name">Name</th>
+                  <th class="calc-col-expression">Calculated attribute</th>
+                </tr>
+              </thead>
+              <tbody id="calcTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <dialog id="manageCalcPresetsDialog" class="preset-manage-dialog">
+      <div class="preset-manage-dialog-header">
+        <h3>Manage calculated attribute presets</h3>
+        <button id="closeManageCalcPresetsBtn" type="button">Close</button>
+      </div>
+      <div class="preset-manage-table-wrap">
+        <table class="preset-manage-table">
+          <colgroup>
+            <col class="preset-col-name" />
+            <col class="preset-col-actions" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Preset name</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="calcPresetManageTableBody"></tbody>
+        </table>
+      </div>
+    </dialog>
+
+    <script src="viewer.js"></script>
+  </body>
+</html>
