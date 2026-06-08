@@ -25,12 +25,265 @@ const state = {
   focusClauseId: null,
   editingCalcId: null,
   focusCalcId: null,
+  activeVersionTag: null,
 };
 
 let suppressPresetSelectChange = false;
 let suppressFilterPresetSelectChange = false;
 let suppressCalcPresetSelectChange = false;
 let columnOrderDragState = null;
+let weaponHistoryManifest = null;
+let weaponHistoryEnabled = false;
+const versionDataCache = new Map();
+
+const WEAPON_HISTORY_DIR = "./data/weapon-history";
+const WEAPON_HISTORY_MANIFEST_URL = `${WEAPON_HISTORY_DIR}/manifest.json`;
+
+function isLocalDevHost(hostname) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
+function getUrlParams() {
+  return new URLSearchParams(location.search);
+}
+
+function resolveWeaponDataUrl() {
+  const override = getUrlParams().get("data");
+  if (override) return override;
+  if (isLocalDevHost(location.hostname)) return "./weapon.json";
+  return "./data/weapon-history/latest.json.gz";
+}
+
+function resolveHistoryAssetUrl(relativePath) {
+  return `${WEAPON_HISTORY_DIR}/${String(relativePath).replace(/^\//, "")}`;
+}
+
+async function fetchGzJson(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+
+  if (!url.endsWith(".gz")) {
+    return response.json();
+  }
+
+  if (typeof DecompressionStream === "undefined") {
+    throw new Error("This browser cannot decompress .gz files (DecompressionStream unavailable).");
+  }
+
+  const decompressed = response.body.pipeThrough(new DecompressionStream("gzip"));
+  const text = await new Response(decompressed).text();
+  return JSON.parse(text);
+}
+
+async function loadWeaponData(url) {
+  return fetchGzJson(url);
+}
+
+async function loadWeaponHistoryManifest() {
+  try {
+    const response = await fetch(WEAPON_HISTORY_MANIFEST_URL);
+    if (!response.ok) return null;
+    const manifest = await response.json();
+    if (!Array.isArray(manifest?.versions) || manifest.versions.length === 0) return null;
+    return manifest;
+  } catch (error) {
+    console.warn("[viewer] Weapon history manifest unavailable.", error);
+    return null;
+  }
+}
+
+function pathKey(path, { reverseIndex = false } = {}) {
+  return path
+    .split("/")
+    .slice(1)
+    .map((segment) => {
+      if (/^\d+$/.test(segment)) {
+        const index = Number(segment);
+        return reverseIndex ? -index : index;
+      }
+      return segment;
+    });
+}
+
+function pointerSegments(pointer) {
+  return pointer.split("/").filter(Boolean);
+}
+
+function resolveParent(root, segments, createMissing = false) {
+  let current = root;
+  for (const segment of segments.slice(0, -1)) {
+    if (current && typeof current === "object" && !Array.isArray(current)) {
+      if (!(segment in current)) {
+        if (!createMissing) throw new KeyError(segment);
+        current[segment] = {};
+      }
+      current = current[segment];
+      continue;
+    }
+    current = current[Number(segment)];
+  }
+  return [current, segments[segments.length - 1]];
+}
+
+class KeyError extends Error {
+  constructor(segment) {
+    super(`Missing path segment: ${segment}`);
+    this.name = "KeyError";
+  }
+}
+
+function applyPatch(data, patch) {
+  const result = structuredClone(data);
+  const removes = patch
+    .filter((operation) => operation.op === "remove")
+    .sort((left, right) => {
+      const a = pathKey(left.p, { reverseIndex: true });
+      const b = pathKey(right.p, { reverseIndex: true });
+      return JSON.stringify(a).localeCompare(JSON.stringify(b));
+    });
+  const replaces = patch.filter((operation) => operation.op === "replace");
+  const adds = patch
+    .filter((operation) => operation.op === "add")
+    .sort((left, right) => JSON.stringify(pathKey(left.p)).localeCompare(JSON.stringify(pathKey(right.p))));
+
+  for (const operation of removes) {
+    const [parent, key] = resolveParent(result, pointerSegments(operation.p));
+    if (Array.isArray(parent)) {
+      parent.splice(Number(key), 1);
+    } else {
+      delete parent[key];
+    }
+  }
+
+  for (const operation of replaces) {
+    const [parent, key] = resolveParent(result, pointerSegments(operation.p));
+    if (Array.isArray(parent)) {
+      parent[Number(key)] = operation.v;
+    } else {
+      parent[key] = operation.v;
+    }
+  }
+
+  for (const operation of adds) {
+    const [parent, key] = resolveParent(result, pointerSegments(operation.p), true);
+    if (Array.isArray(parent)) {
+      const index = Number(key);
+      if (index === parent.length) {
+        parent.push(operation.v);
+      } else {
+        parent.splice(index, 0, operation.v);
+      }
+    } else {
+      parent[key] = operation.v;
+    }
+  }
+
+  return result;
+}
+
+function canUseLatestSnapshot(tag) {
+  return (
+    tag === weaponHistoryManifest?.latestTag &&
+    typeof weaponHistoryManifest?.latestSnapshotFile === "string" &&
+    weaponHistoryManifest.latestSnapshotFile.length > 0
+  );
+}
+
+async function loadLatestSnapshot(tag) {
+  const data = await fetchGzJson(resolveHistoryAssetUrl(weaponHistoryManifest.latestSnapshotFile));
+  versionDataCache.set(tag, structuredClone(data));
+  return structuredClone(data);
+}
+
+async function loadWeaponDataForVersion(tag) {
+  if (!weaponHistoryManifest) {
+    throw new Error("Weapon history manifest is not loaded.");
+  }
+
+  if (versionDataCache.has(tag)) {
+    return structuredClone(versionDataCache.get(tag));
+  }
+
+  if (canUseLatestSnapshot(tag)) {
+    try {
+      return await loadLatestSnapshot(tag);
+    } catch (error) {
+      console.warn("[viewer] Latest snapshot unavailable, falling back to patch chain.", error);
+    }
+  }
+
+  const versions = weaponHistoryManifest.versions;
+  const targetIndex = versions.findIndex((version) => version.tag === tag);
+  if (targetIndex < 0) {
+    throw new Error(`Unknown version tag: ${tag}`);
+  }
+
+  let data = null;
+  let startIndex = 0;
+
+  for (let index = targetIndex; index >= 0; index -= 1) {
+    const versionTag = versions[index].tag;
+    if (versionDataCache.has(versionTag)) {
+      data = structuredClone(versionDataCache.get(versionTag));
+      startIndex = index + 1;
+      break;
+    }
+  }
+
+  for (let index = startIndex; index <= targetIndex; index += 1) {
+    const version = versions[index];
+    if (version.role === "base") {
+      data = await fetchGzJson(resolveHistoryAssetUrl(version.file));
+      versionDataCache.set(version.tag, structuredClone(data));
+      continue;
+    }
+
+    const patch = await fetchGzJson(resolveHistoryAssetUrl(version.file));
+    data = applyPatch(data, patch);
+    versionDataCache.set(version.tag, structuredClone(data));
+  }
+
+  return data;
+}
+
+function resolveInitialVersionTag(session) {
+  const params = getUrlParams();
+  const requested = params.get("version");
+  if (requested && weaponHistoryManifest?.versions?.some((version) => version.tag === requested)) {
+    return requested;
+  }
+  if (session?.activeVersionTag && weaponHistoryManifest?.versions?.some((version) => version.tag === session.activeVersionTag)) {
+    return session.activeVersionTag;
+  }
+  return weaponHistoryManifest?.latestTag || null;
+}
+
+function renderVersionSelect(selectedTag) {
+  if (!elements.versionSelect || !weaponHistoryManifest) return;
+
+  const versions = [...weaponHistoryManifest.versions].reverse();
+  elements.versionSelect.innerHTML = versions
+    .map((version) => {
+      const suffix = version.tag === weaponHistoryManifest.latestTag ? " (latest)" : "";
+      return `<option value="${version.tag}">${version.tag}${suffix}</option>`;
+    })
+    .join("");
+  elements.versionSelect.value = selectedTag;
+  elements.versionSelect.disabled = false;
+  elements.versionSelect.closest("label")?.classList.remove("is-hidden");
+}
+
+function hideVersionSelect() {
+  if (!elements.versionSelect) return;
+  elements.versionSelect.innerHTML = "";
+  elements.versionSelect.disabled = true;
+  elements.versionSelect.closest("label")?.classList.add("is-hidden");
+}
+
+function setVersionSelectBusy(isBusy) {
+  if (!elements.versionSelect) return;
+  elements.versionSelect.disabled = isBusy;
+}
 
 function resolveElement(...ids) {
   for (const id of ids) {
@@ -44,6 +297,7 @@ const elements = {
   searchInput: document.getElementById("searchInput"),
   factionFilter: document.getElementById("factionFilter"),
   categoryFilter: document.getElementById("categoryFilter"),
+  versionSelect: document.getElementById("versionSelect"),
   rowsPerPage: document.getElementById("rowsPerPage"),
   attributeSearchInput: resolveElement("attributeSearchInput", "columnSearchInput"),
   attributeChooserBody: resolveElement("attributeChooserBody", "columnList"),
@@ -3014,6 +3268,7 @@ function snapshotCurrentState() {
     activeFilterPresetName: state.activeFilterPresetName,
     activeCalcPresetName: state.activeCalcPresetName,
     pinnedRowKeys: [...state.pinnedRowKeys],
+    activeVersionTag: state.activeVersionTag,
   };
 }
 
@@ -3044,6 +3299,9 @@ function applySnapshot(snapshot) {
   state.pinnedRowKeys = Array.isArray(snapshot.pinnedRowKeys)
     ? snapshot.pinnedRowKeys.filter((key) => typeof key === "string" && findRowByKey(key))
     : [];
+  if (typeof snapshot.activeVersionTag === "string" && snapshot.activeVersionTag) {
+    state.activeVersionTag = snapshot.activeVersionTag;
+  }
   normalizeLegacyCalculatedDefinitions();
 
   if (
@@ -4649,6 +4907,11 @@ function wireEvents() {
   bindEvent(elements.searchInput, "input", applyFiltersAndSort, "searchInput");
   bindEvent(elements.factionFilter, "change", applyFiltersAndSort, "factionFilter");
   bindEvent(elements.categoryFilter, "change", applyFiltersAndSort, "categoryFilter");
+  bindEvent(elements.versionSelect, "change", () => {
+    const nextTag = elements.versionSelect?.value;
+    if (!nextTag || nextTag === state.activeVersionTag) return;
+    reloadWeaponVersion(nextTag);
+  }, "versionSelect");
   bindEvent(elements.rowsPerPage, "change", () => {
     state.rowsPerPage = Number(elements.rowsPerPage.value) || 50;
     state.currentPage = 1;
@@ -4729,6 +4992,85 @@ function fillStaticIdentityRegistry() {
   });
 }
 
+function rebuildWeaponRowsFromData(data) {
+  state.schemaRegistry = new Map();
+  state.rows = flattenWeapons(data);
+  fillStaticIdentityRegistry();
+  buildAvailableColumns();
+  fillSelectOptions(
+    elements.factionFilter,
+    [...new Set(state.rows.map((row) => row.faction).filter(Boolean))].sort(),
+    "All factions",
+  );
+  fillSelectOptions(
+    elements.categoryFilter,
+    [...new Set(state.rows.map((row) => row.category).filter(Boolean))].sort(),
+    "All categories",
+  );
+}
+
+async function loadWeaponDataset() {
+  const overrideUrl = getUrlParams().get("data");
+  if (overrideUrl) {
+    weaponHistoryEnabled = false;
+    hideVersionSelect();
+    elements.statusText.textContent = `Loading weapon data from ${overrideUrl}...`;
+    const data = await loadWeaponData(overrideUrl);
+    state.activeVersionTag = null;
+    return data;
+  }
+
+  weaponHistoryManifest = await loadWeaponHistoryManifest();
+  if (weaponHistoryManifest) {
+    weaponHistoryEnabled = true;
+    const session = loadSessionState();
+    const versionTag = resolveInitialVersionTag(session);
+    renderVersionSelect(versionTag);
+    elements.statusText.textContent = `Loading weapon data (${versionTag})...`;
+    setVersionSelectBusy(true);
+    const data = await loadWeaponDataForVersion(versionTag);
+    state.activeVersionTag = versionTag;
+    return data;
+  }
+
+  weaponHistoryEnabled = false;
+  hideVersionSelect();
+  const fallbackUrl = resolveWeaponDataUrl();
+  elements.statusText.textContent = `Loading weapon data from ${fallbackUrl}...`;
+  const data = await loadWeaponData(fallbackUrl);
+  state.activeVersionTag = null;
+  return data;
+}
+
+async function reloadWeaponVersion(tag) {
+  if (!weaponHistoryEnabled || !weaponHistoryManifest) return;
+
+  const preserved = snapshotCurrentState();
+  setVersionSelectBusy(true);
+  elements.statusText.textContent = `Loading weapon data (${tag})...`;
+
+  try {
+    const data = await loadWeaponDataForVersion(tag);
+    state.activeVersionTag = tag;
+    rebuildWeaponRowsFromData(data);
+    preserved.visibleColumns = preserved.visibleColumns.filter((column) => state.availableColumns.includes(column));
+    preserved.pinnedRowKeys = preserved.pinnedRowKeys.filter((key) => findRowByKey(key));
+    applySnapshot(preserved);
+    if (elements.versionSelect) {
+      elements.versionSelect.value = tag;
+    }
+    saveSessionState();
+  } catch (error) {
+    console.error(error);
+    elements.statusText.textContent = `Failed to load weapon data (${tag}).`;
+    if (elements.versionSelect) {
+      elements.versionSelect.value = state.activeVersionTag || weaponHistoryManifest.latestTag;
+    }
+  } finally {
+    setVersionSelectBusy(false);
+  }
+}
+
 async function init() {
   reportMissingElements();
   wireEvents();
@@ -4736,18 +5078,13 @@ async function init() {
     console.error("[viewer] Cannot start without #statusText.");
     return;
   }
-  elements.statusText.textContent = "Loading weapon.json...";
+
   try {
-    const response = await fetch("./weapon.json");
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
+    const data = await loadWeaponDataset();
     elements.statusText.textContent = "Flattening weapon records...";
-    state.rows = flattenWeapons(data);
-    fillStaticIdentityRegistry();
-    buildAvailableColumns();
-    fillSelectOptions(elements.factionFilter, [...new Set(state.rows.map((r) => r.faction).filter(Boolean))].sort(), "All factions");
-    fillSelectOptions(elements.categoryFilter, [...new Set(state.rows.map((r) => r.category).filter(Boolean))].sort(), "All categories");
+    rebuildWeaponRowsFromData(data);
     state.filteredRows = [...state.rows];
+
     loadPresets();
     loadFilterPresets();
     loadCalcPresets();
@@ -4756,12 +5093,16 @@ async function init() {
     renderCalcPresetOptions(DEFAULT_CALC_PRESET_NAME);
     renderFilterTable();
     renderCalculatedColumns();
+
     const session = loadSessionState();
     if (session) {
       applySnapshot(session);
       renderPresetOptions(state.activePresetName);
       renderFilterPresetOptions(state.activeFilterPresetName);
       renderCalcPresetOptions(state.activeCalcPresetName);
+      if (weaponHistoryEnabled && session.activeVersionTag && elements.versionSelect) {
+        elements.versionSelect.value = session.activeVersionTag;
+      }
     } else {
       applyDefaultPreset();
       applyDefaultFilterPreset();
@@ -4770,9 +5111,17 @@ async function init() {
       renderFilterPresetOptions(DEFAULT_FILTER_PRESET_NAME);
       renderCalcPresetOptions(DEFAULT_CALC_PRESET_NAME);
     }
+
+    if (weaponHistoryEnabled && state.activeVersionTag) {
+      elements.statusText.textContent = `Loaded ${state.rows.length} weapons from ${state.activeVersionTag}.`;
+    }
+
+    setVersionSelectBusy(false);
+    saveSessionState();
   } catch (error) {
     console.error(error);
-    elements.statusText.textContent = "Failed to load weapon.json. Run this with a local web server, not file://.";
+    elements.statusText.textContent = "Failed to load weapon data. Run locally with a web server (not file://).";
+    setVersionSelectBusy(false);
   }
 }
 

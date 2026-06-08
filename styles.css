@@ -340,6 +340,10 @@ label {
   font-size: 0.9rem;
 }
 
+label.is-hidden {
+  display: none;
+}
+
 input,
 select,
 button {

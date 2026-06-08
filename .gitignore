@@ -1,0 +1,4 @@
+dist/
+data/backups/
+weapon.json
+weapon.json.gz

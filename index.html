@@ -11,7 +11,7 @@
       <header class="page-header">
         <div class="page-header-text">
           <h1>CoH3 Weapon Stats Viewer</h1>
-          <p>Search, filter, and sort weapon stats from <code>weapon.json</code>.</p>
+          <p>Search, filter, and sort weapon stats across historical <code>weapon.json</code> patches.</p>
         </div>
         <div class="page-header-toolbar">
           <button
@@ -80,6 +80,13 @@
         <label>
           Search
           <input id="searchInput" type="text" placeholder="weapon name or path..." />
+        </label>
+
+        <label>
+          Data version
+          <select id="versionSelect" aria-label="Data version" disabled>
+            <option value="">Loading versions...</option>
+          </select>
         </label>
 
         <label>
