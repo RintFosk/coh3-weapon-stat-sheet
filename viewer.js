@@ -26,6 +26,7 @@ const state = {
   editingCalcId: null,
   focusCalcId: null,
   activeVersionTag: null,
+  columnDisplayWidths: new Map(),
 };
 
 let suppressPresetSelectChange = false;
@@ -381,6 +382,14 @@ const CORE_COLUMNS = [
   "reload.duration.min",
   "reload.duration.max",
 ];
+
+const REQUIRED_VISIBLE_COLUMN = "weaponName";
+
+function ensureRequiredVisibleColumns(columns) {
+  if (!state.availableColumns.includes(REQUIRED_VISIBLE_COLUMN)) return columns;
+  if (columns.includes(REQUIRED_VISIBLE_COLUMN)) return columns;
+  return [REQUIRED_VISIBLE_COLUMN, ...columns];
+}
 
 function normalizePrimitive(value) {
   if (typeof value === "string") {
@@ -742,6 +751,12 @@ function createTableRow(row, { pinned = false } = {}) {
       td.textContent = formatCell(row[key], key);
     }
 
+    if (!isAggregateArrayColumn(key) && state.columnDisplayWidths.has(key)) {
+      td.classList.add("scalar-col");
+    } else if (isAggregateArrayColumn(key) && state.columnDisplayWidths.has(key)) {
+      td.classList.add("array-col");
+    }
+
     tr.appendChild(td);
   });
 
@@ -804,6 +819,93 @@ function formatCell(value, column = "") {
     return value;
   }
   return value ?? "";
+}
+
+function isAggregateArrayColumn(column) {
+  if (!column || !column.includes("[]")) return false;
+  return column.endsWith("[]") || column.endsWith(".count") || column.endsWith(".summary");
+}
+
+function getColumnHeaderLabel(column) {
+  const parts = getColumnPathParts(column);
+  return parts[parts.length - 1] || column;
+}
+
+function measureColumnCellText(row, column) {
+  return String(formatCell(row[column], column));
+}
+
+function computeScalarColumnDisplayWidths() {
+  state.columnDisplayWidths = new Map();
+
+  const paddingCh = 2.5;
+  const sortReserveCh = 2;
+  const minCh = 5;
+  const absoluteMaxCh = 96;
+  const weaponNamePinReserveCh = 3.5;
+
+  for (const column of state.availableColumns) {
+    if (isAggregateArrayColumn(column)) {
+      let maxLen = getColumnHeaderLabel(column).length + sortReserveCh;
+      for (const row of state.rows) {
+        const textLen = measureColumnCellText(row, column).length;
+        if (textLen > maxLen) maxLen = textLen;
+      }
+      const widthCh = Math.min(absoluteMaxCh, Math.max(minCh, maxLen + paddingCh));
+      state.columnDisplayWidths.set(column, widthCh);
+      continue;
+    }
+
+    let maxLen = getColumnHeaderLabel(column).length + sortReserveCh;
+    for (const row of state.rows) {
+      const textLen = measureColumnCellText(row, column).length;
+      if (textLen > maxLen) maxLen = textLen;
+    }
+
+    let widthCh = maxLen + paddingCh;
+    if (column === "weaponName") {
+      widthCh += weaponNamePinReserveCh;
+      widthCh = Math.min(widthCh, 55);
+    }
+    widthCh = Math.min(absoluteMaxCh, Math.max(minCh, widthCh));
+    state.columnDisplayWidths.set(column, widthCh);
+  }
+}
+
+function setTableColWidthCh(col, widthCh) {
+  const width = `${widthCh}ch`;
+  col.style.width = width;
+  col.style.minWidth = width;
+  col.style.maxWidth = width;
+}
+
+function applyTableColumnWidths() {
+  const table = document.getElementById("statsTable");
+  if (!table || state.visibleColumns.length === 0) return;
+
+  let colgroup = table.querySelector("colgroup");
+  if (!colgroup) {
+    colgroup = document.createElement("colgroup");
+    table.prepend(colgroup);
+  }
+  colgroup.replaceChildren();
+
+  for (const column of state.visibleColumns) {
+    const col = document.createElement("col");
+    const widthCh = state.columnDisplayWidths.get(column);
+    if (widthCh) {
+      setTableColWidthCh(col, widthCh);
+      col.className = isAggregateArrayColumn(column) ? "array-col" : "scalar-col";
+    }
+    colgroup.appendChild(col);
+  }
+
+  for (const th of elements.tableHead.querySelectorAll("th.header-leaf[data-key]")) {
+    const key = th.dataset.key;
+    const hasFixedWidth = state.columnDisplayWidths.has(key);
+    th.classList.toggle("scalar-col", hasFixedWidth && !isAggregateArrayColumn(key));
+    th.classList.toggle("array-col", hasFixedWidth && isAggregateArrayColumn(key));
+  }
 }
 
 function csvEscape(value) {
@@ -1323,9 +1425,12 @@ function applyCalculatedColumnsUpdate() {
   recomputeCalculatedColumns();
   rebuildCalculatedRegistry();
   buildAvailableColumns();
+  computeScalarColumnDisplayWidths();
   renderCalcTable();
   renderColumnChooser();
-  state.visibleColumns = state.visibleColumns.filter((column) => state.availableColumns.includes(column));
+  state.visibleColumns = ensureRequiredVisibleColumns(
+    state.visibleColumns.filter((column) => state.availableColumns.includes(column)),
+  );
   applyFiltersAndSort();
   saveSessionState();
 }
@@ -1393,6 +1498,7 @@ function renderTable() {
     elements.tableHead.innerHTML = "";
     elements.pinnedTableBody.innerHTML = "";
     elements.tableBody.innerHTML = "";
+    document.getElementById("statsTable")?.querySelector("colgroup")?.replaceChildren();
     elements.statusText.textContent = "No attributes selected. Pick attributes above.";
     elements.pageText.textContent = "Page 1 / 1";
     return;
@@ -1405,6 +1511,7 @@ function renderTable() {
   const pageRows = state.filteredRows.slice(start, start + state.rowsPerPage);
 
   renderMultiRowHeader(state.visibleColumns);
+  applyTableColumnWidths();
 
   state.pinnedRowKeys = state.pinnedRowKeys.filter((key) => findRowByKey(key));
 
@@ -1491,7 +1598,7 @@ function applyGroupSelection(groupAttributes, selectAll) {
   if (selectAll) {
     addVisibleColumnsInDefaultOrder(groupAttributes);
   } else {
-    const remove = new Set(groupAttributes);
+    const remove = new Set(groupAttributes.filter((attr) => attr !== REQUIRED_VISIBLE_COLUMN));
     setVisibleColumns(state.visibleColumns.filter((attr) => !remove.has(attr)));
   }
 }
@@ -1554,7 +1661,17 @@ function createAttributeItemRow(attribute) {
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = state.visibleColumns.includes(attribute);
+  const isRequired = attribute === REQUIRED_VISIBLE_COLUMN;
+  if (isRequired) {
+    checkbox.checked = true;
+    checkbox.disabled = true;
+    checkbox.title = "Weapon name is always shown";
+  }
   checkbox.addEventListener("change", () => {
+    if (isRequired) {
+      checkbox.checked = true;
+      return;
+    }
     if (checkbox.checked) {
       if (!state.visibleColumns.includes(attribute)) {
         addVisibleColumnsInDefaultOrder([attribute]);
@@ -3137,7 +3254,9 @@ function createCalcTableRow(definition, index = 0) {
     rebuildCalculatedRegistry();
     buildAvailableColumns();
     renderColumnChooser();
-    state.visibleColumns = state.visibleColumns.filter((column) => state.availableColumns.includes(column));
+    state.visibleColumns = ensureRequiredVisibleColumns(
+      state.visibleColumns.filter((column) => state.availableColumns.includes(column)),
+    );
     applyFiltersAndSort();
     saveSessionState();
     if (refreshTable) renderCalcTable();
@@ -3321,8 +3440,11 @@ function applySnapshot(snapshot) {
   recomputeCalculatedColumns();
   rebuildCalculatedRegistry();
   buildAvailableColumns();
+  computeScalarColumnDisplayWidths();
 
-  state.visibleColumns = savedVisibleColumns.filter((column) => state.availableColumns.includes(column));
+  state.visibleColumns = ensureRequiredVisibleColumns(
+    savedVisibleColumns.filter((column) => state.availableColumns.includes(column)),
+  );
   if (state.visibleColumns.length === 0) {
     state.visibleColumns = ["weaponName", "faction", "category"];
   }
@@ -4801,7 +4923,7 @@ function resetVisibleColumnOrder() {
 }
 
 function setVisibleColumns(columns) {
-  const valid = columns.filter((c) => state.availableColumns.includes(c));
+  const valid = ensureRequiredVisibleColumns(columns.filter((c) => state.availableColumns.includes(c)));
   state.visibleColumns = valid.length ? valid : ["weaponName", "faction", "category"];
   if (!state.visibleColumns.includes(state.sortKey)) {
     state.sortKey = state.visibleColumns[0];
@@ -4997,6 +5119,7 @@ function rebuildWeaponRowsFromData(data) {
   state.rows = flattenWeapons(data);
   fillStaticIdentityRegistry();
   buildAvailableColumns();
+  computeScalarColumnDisplayWidths();
   fillSelectOptions(
     elements.factionFilter,
     [...new Set(state.rows.map((row) => row.faction).filter(Boolean))].sort(),

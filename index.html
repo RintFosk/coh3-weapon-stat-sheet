@@ -51,6 +51,12 @@
             Calculated attributes
           </button>
           <button id="exportCsvBtn" type="button">Export CSV</button>
+          <label class="page-header-version is-hidden">
+            Data version
+            <select id="versionSelect" aria-label="Data version" disabled>
+              <option value="">Loading versions...</option>
+            </select>
+          </label>
         </div>
       </header>
 
@@ -80,13 +86,6 @@
         <label>
           Search
           <input id="searchInput" type="text" placeholder="weapon name or path..." />
-        </label>
-
-        <label>
-          Data version
-          <select id="versionSelect" aria-label="Data version" disabled>
-            <option value="">Loading versions...</option>
-          </select>
         </label>
 
         <label>

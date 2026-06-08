@@ -91,6 +91,22 @@ body {
   flex: 0 1 auto;
 }
 
+.page-header-version {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.page-header-version select {
+  min-width: 9.5rem;
+  font-size: 0.86rem;
+  padding: 6px 8px;
+}
+
 .drawer-trigger {
   font-size: 0.86rem;
   white-space: nowrap;
@@ -1524,7 +1540,7 @@ button:hover {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-width: 160px;
+  min-width: 0;
 }
 
 .cell-weapon-name-text {
@@ -1573,6 +1589,16 @@ button:hover {
   border-collapse: separate;
   border-spacing: 0;
   min-width: 1200px;
+  table-layout: fixed;
+}
+
+#statsTable th.scalar-col,
+#statsTable td.scalar-col:not(.cell-weapon-name),
+#statsTable th.array-col,
+#statsTable td.array-col {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 0;
 }
 
 #statsTable thead {
