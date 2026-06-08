@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CoH3 Weapon Stats Viewer</title>
+    <script>
+      (function () {
+        var theme = localStorage.getItem("coh3_weapon_viewer_theme_v1");
+        document.documentElement.dataset.theme = theme === "light" ? "light" : "dark";
+      })();
+    </script>
+    <link rel="stylesheet" href="themes.css" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -57,6 +64,10 @@
               <option value="">Loading versions...</option>
             </select>
           </label>
+          <button id="themeToggleBtn" type="button" class="theme-toggle-btn" aria-label="Switch to light theme" title="Switch to light theme">
+            <span class="theme-toggle-icon" aria-hidden="true">☀</span>
+            <span class="theme-toggle-label">Light</span>
+          </button>
         </div>
       </header>
 
@@ -114,7 +125,10 @@
       </section>
 
       <section class="status-bar">
-        <div id="statusText">Loading data...</div>
+        <div class="status-bar-left">
+          <span id="loadingIndicator" class="loading-indicator" role="status" aria-live="polite" aria-hidden="true"></span>
+          <div id="statusText">Loading data...</div>
+        </div>
         <div class="page-controls">
           <button id="prevPageBtn" type="button">Prev</button>
           <span id="pageText">Page 1 / 1</span>
@@ -136,26 +150,31 @@
     <div id="topDrawerAttributes" class="top-drawer" data-drawer-panel="attributes" role="dialog" aria-modal="true" aria-labelledby="topDrawerAttributesTitle" aria-hidden="true">
       <div class="top-drawer-inner">
         <section class="attribute-controls drawer-panel-section">
-          <div class="attribute-toolbar">
-            <h3 id="topDrawerAttributesTitle" class="attribute-toolbar-title">Attributes</h3>
-            <div class="attribute-toolbar-actions">
-              <button id="showAllAttributesBtn" type="button">Show all</button>
-              <button id="clearAttributesBtn" type="button">Clear</button>
-              <button id="expandAllGroupsBtn" type="button">Expand all</button>
-              <button id="collapseAllGroupsBtn" type="button">Collapse all</button>
+          <div class="attribute-toolbar attributes-toolbar">
+            <div class="attribute-toolbar-row">
+              <h3 id="topDrawerAttributesTitle" class="attribute-toolbar-title">Attributes</h3>
+              <div class="attribute-toolbar-presets">
+                <span class="attribute-toolbar-presets-label">Presets</span>
+                <select id="presetSelect" aria-label="Preset"></select>
+                <button id="applyPresetBtn" type="button">Apply preset</button>
+                <button id="savePresetBtn" type="button">Save preset</button>
+                <button id="managePresetsBtn" type="button">Manage presets</button>
+              </div>
             </div>
-            <input
-              id="attributeSearchInput"
-              class="attribute-toolbar-search"
-              type="text"
-              placeholder="Find attributes..."
-              aria-label="Find attributes"
-            />
-            <div class="attribute-toolbar-presets">
-              <span class="attribute-toolbar-presets-label">Presets</span>
-              <select id="presetSelect" aria-label="Preset"></select>
-              <button id="savePresetBtn" type="button">Save preset</button>
-              <button id="managePresetsBtn" type="button">Manage presets</button>
+            <div class="attribute-toolbar-row">
+              <input
+                id="attributeSearchInput"
+                class="attribute-toolbar-search"
+                type="text"
+                placeholder="Find attributes..."
+                aria-label="Find attributes"
+              />
+              <div class="attribute-toolbar-actions">
+                <button id="showAllAttributesBtn" type="button">Show all</button>
+                <button id="clearAttributesBtn" type="button">Clear</button>
+                <button id="expandAllGroupsBtn" type="button">Expand all</button>
+                <button id="collapseAllGroupsBtn" type="button">Collapse all</button>
+              </div>
             </div>
           </div>
           <div class="attribute-chooser-wrap">
@@ -207,6 +226,7 @@
             <div class="attribute-toolbar-presets">
               <span class="attribute-toolbar-presets-label">Presets</span>
               <select id="filterPresetSelect" aria-label="Filter preset"></select>
+              <button id="applyFilterPresetBtn" type="button">Apply preset</button>
               <button id="saveFilterPresetBtn" type="button">Save preset</button>
               <button id="manageFilterPresetsBtn" type="button">Manage presets</button>
             </div>
@@ -261,6 +281,7 @@
             <div class="attribute-toolbar-presets">
               <span class="attribute-toolbar-presets-label">Presets</span>
               <select id="calcPresetSelect" aria-label="Calculated attribute preset"></select>
+              <button id="applyCalcPresetBtn" type="button">Apply preset</button>
               <button id="saveCalcPresetBtn" type="button">Save preset</button>
               <button id="manageCalcPresetsBtn" type="button">Manage presets</button>
             </div>

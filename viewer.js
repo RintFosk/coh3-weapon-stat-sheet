@@ -286,6 +286,62 @@ function setVersionSelectBusy(isBusy) {
   elements.versionSelect.disabled = isBusy;
 }
 
+function setLoading(isLoading, message) {
+  if (elements.loadingIndicator) {
+    elements.loadingIndicator.classList.toggle("is-active", isLoading);
+    elements.loadingIndicator.setAttribute("aria-hidden", String(!isLoading));
+    elements.loadingIndicator.setAttribute("aria-label", isLoading ? "Loading" : "");
+  }
+  document.body.classList.toggle("is-loading", isLoading);
+  setVersionSelectBusy(isLoading);
+  if (message !== undefined && elements.statusText) {
+    elements.statusText.textContent = message;
+  }
+}
+
+function getTheme() {
+  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+}
+
+function updateThemeToggleButton() {
+  if (!elements.themeToggleBtn) return;
+  const isDark = getTheme() === "dark";
+  const nextLabel = isDark ? "Switch to light theme" : "Switch to dark theme";
+  elements.themeToggleBtn.setAttribute("aria-label", nextLabel);
+  elements.themeToggleBtn.title = nextLabel;
+  const icon = elements.themeToggleBtn.querySelector(".theme-toggle-icon");
+  const label = elements.themeToggleBtn.querySelector(".theme-toggle-label");
+  if (icon) icon.textContent = isDark ? "☀" : "☾";
+  if (label) label.textContent = isDark ? "Light" : "Dark";
+}
+
+function applyTheme(theme) {
+  const nextTheme = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = nextTheme;
+  try {
+    localStorage.setItem(STORAGE_KEYS.theme, nextTheme);
+  } catch (error) {
+    console.warn("Theme save failed", error);
+  }
+  updateThemeToggleButton();
+}
+
+function toggleTheme() {
+  applyTheme(getTheme() === "dark" ? "light" : "dark");
+}
+
+function initTheme() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEYS.theme);
+    if (stored === "light" || stored === "dark") {
+      document.documentElement.dataset.theme = stored;
+    }
+  } catch (error) {
+    console.warn("Theme load failed", error);
+  }
+  updateThemeToggleButton();
+}
+
 function resolveElement(...ids) {
   for (const id of ids) {
     const el = document.getElementById(id);
@@ -312,6 +368,7 @@ const elements = {
   filterTableBody: document.getElementById("filterTableBody"),
   filterPresetSelect: document.getElementById("filterPresetSelect"),
   saveFilterPresetBtn: document.getElementById("saveFilterPresetBtn"),
+  applyFilterPresetBtn: document.getElementById("applyFilterPresetBtn"),
   manageFilterPresetsBtn: document.getElementById("manageFilterPresetsBtn"),
   manageFilterPresetsDialog: document.getElementById("manageFilterPresetsDialog"),
   closeManageFilterPresetsBtn: document.getElementById("closeManageFilterPresetsBtn"),
@@ -319,6 +376,7 @@ const elements = {
   calcTableBody: document.getElementById("calcTableBody"),
   calcPresetSelect: document.getElementById("calcPresetSelect"),
   saveCalcPresetBtn: document.getElementById("saveCalcPresetBtn"),
+  applyCalcPresetBtn: document.getElementById("applyCalcPresetBtn"),
   manageCalcPresetsBtn: document.getElementById("manageCalcPresetsBtn"),
   manageCalcPresetsDialog: document.getElementById("manageCalcPresetsDialog"),
   closeManageCalcPresetsBtn: document.getElementById("closeManageCalcPresetsBtn"),
@@ -331,13 +389,16 @@ const elements = {
   expandColumnOrderGroupsBtn: document.getElementById("expandColumnOrderGroupsBtn"),
   collapseColumnOrderGroupsBtn: document.getElementById("collapseColumnOrderGroupsBtn"),
   exportCsvBtn: document.getElementById("exportCsvBtn"),
+  themeToggleBtn: document.getElementById("themeToggleBtn"),
   savePresetBtn: document.getElementById("savePresetBtn"),
+  applyPresetBtn: document.getElementById("applyPresetBtn"),
   presetSelect: document.getElementById("presetSelect"),
   managePresetsBtn: document.getElementById("managePresetsBtn"),
   managePresetsDialog: document.getElementById("managePresetsDialog"),
   closeManagePresetsBtn: document.getElementById("closeManagePresetsBtn"),
   presetManageTableBody: document.getElementById("presetManageTableBody"),
   statusText: document.getElementById("statusText"),
+  loadingIndicator: document.getElementById("loadingIndicator"),
   pageText: document.getElementById("pageText"),
   prevPageBtn: document.getElementById("prevPageBtn"),
   nextPageBtn: document.getElementById("nextPageBtn"),
@@ -357,6 +418,7 @@ const STORAGE_KEYS = {
   presets: "coh3_weapon_viewer_presets_v1",
   filterPresets: "coh3_weapon_viewer_filter_presets_v1",
   calcPresets: "coh3_weapon_viewer_calc_presets_v1",
+  theme: "coh3_weapon_viewer_theme_v1",
 };
 
 const DEFAULT_PRESET_NAME = "default";
@@ -3561,12 +3623,7 @@ function hasStoredPreset(name) {
 }
 
 function getSelectedPresetName() {
-  const selectValue = elements.presetSelect?.value?.trim();
-  if (selectValue) {
-    state.activePresetName = selectValue;
-    return selectValue;
-  }
-  return state.activePresetName || DEFAULT_PRESET_NAME;
+  return elements.presetSelect?.value?.trim() || state.activePresetName || DEFAULT_PRESET_NAME;
 }
 
 function syncPresetSelectValue(name) {
@@ -3843,12 +3900,7 @@ function hasStoredFilterPreset(name) {
 }
 
 function getSelectedFilterPresetName() {
-  const selectValue = elements.filterPresetSelect?.value?.trim();
-  if (selectValue) {
-    state.activeFilterPresetName = selectValue;
-    return selectValue;
-  }
-  return state.activeFilterPresetName || DEFAULT_FILTER_PRESET_NAME;
+  return elements.filterPresetSelect?.value?.trim() || state.activeFilterPresetName || DEFAULT_FILTER_PRESET_NAME;
 }
 
 function syncFilterPresetSelectValue(name) {
@@ -4120,12 +4172,26 @@ function hasStoredCalcPreset(name) {
 }
 
 function getSelectedCalcPresetName() {
-  const selectValue = elements.calcPresetSelect?.value?.trim();
-  if (selectValue) {
-    state.activeCalcPresetName = selectValue;
-    return selectValue;
+  return elements.calcPresetSelect?.value?.trim() || state.activeCalcPresetName || DEFAULT_CALC_PRESET_NAME;
+}
+
+function syncCalcPresetSelectValue(name) {
+  if (!elements.calcPresetSelect) return;
+  suppressCalcPresetSelectChange = true;
+  if (!isDefaultCalcPreset(name) && hasStoredCalcPreset(name)) {
+    const exists = [...elements.calcPresetSelect.options].some((option) => option.value === name);
+    if (!exists) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      elements.calcPresetSelect.appendChild(option);
+    }
   }
-  return state.activeCalcPresetName || DEFAULT_CALC_PRESET_NAME;
+  if ([...elements.calcPresetSelect.options].some((option) => option.value === name)) {
+    elements.calcPresetSelect.value = name;
+  }
+  state.activeCalcPresetName = name;
+  suppressCalcPresetSelectChange = false;
 }
 
 function renderCalcPresetOptions(selectedName = state.activeCalcPresetName || DEFAULT_CALC_PRESET_NAME) {
@@ -4985,12 +5051,17 @@ function openTopDrawer(panelId) {
   drawer.setAttribute("aria-hidden", "false");
   if (panelId === "filters") {
     renderFilterTable();
+    syncFilterPresetSelectValue(state.activeFilterPresetName || DEFAULT_FILTER_PRESET_NAME);
   }
   if (panelId === "column-order") {
     renderColumnOrderList();
   }
   if (panelId === "calculated") {
     renderCalcTable();
+    syncCalcPresetSelectValue(state.activeCalcPresetName || DEFAULT_CALC_PRESET_NAME);
+  }
+  if (panelId === "attributes") {
+    syncPresetSelectValue(state.activePresetName || DEFAULT_PRESET_NAME);
   }
   elements.topDrawerBackdrop?.classList.add("is-visible");
   elements.topDrawerBackdrop?.setAttribute("aria-hidden", "false");
@@ -5054,28 +5125,7 @@ function wireEvents() {
     }
   }, "nextPageBtn");
   bindEvent(elements.attributeSearchInput, "input", renderAttributeChooser, "attributeSearchInput");
-  bindEvent(elements.presetSelect, "change", () => {
-    if (suppressPresetSelectChange) return;
-    loadPresetByName(getSelectedPresetName());
-  }, "presetSelect");
-  bindEvent(elements.showAllAttributesBtn, "click", () => setVisibleColumns(getDefaultVisibleColumnOrder(state.availableColumns)), "showAllAttributesBtn");
-  bindEvent(elements.clearAttributesBtn, "click", () => setVisibleColumns(["weaponName", "faction", "category"]), "clearAttributesBtn");
-  bindEvent(elements.expandAllGroupsBtn, "click", () => setAllAttributeGroupsExpanded(true), "expandAllGroupsBtn");
-  bindEvent(elements.collapseAllGroupsBtn, "click", () => setAllAttributeGroupsExpanded(false), "collapseAllGroupsBtn");
-  bindEvent(elements.addFilterBtn, "click", addNewFilterRow, "addFilterBtn");
-  bindEvent(elements.activateAllFiltersBtn, "click", activateAllFilters, "activateAllFiltersBtn");
-  bindEvent(elements.deactivateAllFiltersBtn, "click", deactivateAllFilters, "deactivateAllFiltersBtn");
-  bindEvent(elements.filterPresetSelect, "change", () => {
-    if (suppressFilterPresetSelectChange) return;
-    loadFilterPresetByName(getSelectedFilterPresetName());
-  }, "filterPresetSelect");
-  bindEvent(elements.saveFilterPresetBtn, "click", saveNamedFilterPreset, "saveFilterPresetBtn");
-  bindEvent(elements.manageFilterPresetsBtn, "click", openManageFilterPresetsDialog, "manageFilterPresetsBtn");
-  bindEvent(elements.closeManageFilterPresetsBtn, "click", closeManageFilterPresetsDialog, "closeManageFilterPresetsBtn");
-  elements.manageFilterPresetsDialog?.addEventListener("cancel", (event) => {
-    event.preventDefault();
-    closeManageFilterPresetsDialog();
-  });
+  bindEvent(elements.applyPresetBtn, "click", () => loadPresetByName(getSelectedPresetName()), "applyPresetBtn");
   bindEvent(elements.savePresetBtn, "click", saveNamedPreset, "savePresetBtn");
   bindEvent(elements.managePresetsBtn, "click", openManagePresetsDialog, "managePresetsBtn");
   bindEvent(elements.closeManagePresetsBtn, "click", closeManagePresetsDialog, "closeManagePresetsBtn");
@@ -5083,13 +5133,25 @@ function wireEvents() {
     event.preventDefault();
     closeManagePresetsDialog();
   });
+  bindEvent(elements.showAllAttributesBtn, "click", () => setVisibleColumns(getDefaultVisibleColumnOrder(state.availableColumns)), "showAllAttributesBtn");
+  bindEvent(elements.clearAttributesBtn, "click", () => setVisibleColumns(["weaponName", "faction", "category"]), "clearAttributesBtn");
+  bindEvent(elements.expandAllGroupsBtn, "click", () => setAllAttributeGroupsExpanded(true), "expandAllGroupsBtn");
+  bindEvent(elements.collapseAllGroupsBtn, "click", () => setAllAttributeGroupsExpanded(false), "collapseAllGroupsBtn");
+  bindEvent(elements.addFilterBtn, "click", addNewFilterRow, "addFilterBtn");
+  bindEvent(elements.activateAllFiltersBtn, "click", activateAllFilters, "activateAllFiltersBtn");
+  bindEvent(elements.deactivateAllFiltersBtn, "click", deactivateAllFilters, "deactivateAllFiltersBtn");
+  bindEvent(elements.applyFilterPresetBtn, "click", () => loadFilterPresetByName(getSelectedFilterPresetName()), "applyFilterPresetBtn");
+  bindEvent(elements.saveFilterPresetBtn, "click", saveNamedFilterPreset, "saveFilterPresetBtn");
+  bindEvent(elements.manageFilterPresetsBtn, "click", openManageFilterPresetsDialog, "manageFilterPresetsBtn");
+  bindEvent(elements.closeManageFilterPresetsBtn, "click", closeManageFilterPresetsDialog, "closeManageFilterPresetsBtn");
+  elements.manageFilterPresetsDialog?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeManageFilterPresetsDialog();
+  });
   bindEvent(elements.addCalcColumnBtn, "click", addNewCalcRow, "addCalcColumnBtn");
   bindEvent(elements.displayAllCalcBtn, "click", displayAllCalculatedColumns, "displayAllCalcBtn");
   bindEvent(elements.clearCalcColumnsBtn, "click", clearAllCalculatedColumns, "clearCalcColumnsBtn");
-  bindEvent(elements.calcPresetSelect, "change", () => {
-    if (suppressCalcPresetSelectChange) return;
-    loadCalcPresetByName(getSelectedCalcPresetName());
-  }, "calcPresetSelect");
+  bindEvent(elements.applyCalcPresetBtn, "click", () => loadCalcPresetByName(getSelectedCalcPresetName()), "applyCalcPresetBtn");
   bindEvent(elements.saveCalcPresetBtn, "click", saveNamedCalcPreset, "saveCalcPresetBtn");
   bindEvent(elements.manageCalcPresetsBtn, "click", openManageCalcPresetsDialog, "manageCalcPresetsBtn");
   bindEvent(elements.closeManageCalcPresetsBtn, "click", closeManageCalcPresetsDialog, "closeManageCalcPresetsBtn");
@@ -5098,6 +5160,7 @@ function wireEvents() {
     closeManageCalcPresetsDialog();
   });
   bindEvent(elements.exportCsvBtn, "click", exportFilteredRowsToCsv, "exportCsvBtn");
+  bindEvent(elements.themeToggleBtn, "click", toggleTheme, "themeToggleBtn");
   bindEvent(elements.resetColumnOrderBtn, "click", resetVisibleColumnOrder, "resetColumnOrderBtn");
   bindEvent(elements.expandColumnOrderGroupsBtn, "click", () => setAllColumnOrderGroupsExpanded(true), "expandColumnOrderGroupsBtn");
   bindEvent(elements.collapseColumnOrderGroupsBtn, "click", () => setAllColumnOrderGroupsExpanded(false), "collapseColumnOrderGroupsBtn");
@@ -5137,7 +5200,7 @@ async function loadWeaponDataset() {
   if (overrideUrl) {
     weaponHistoryEnabled = false;
     hideVersionSelect();
-    elements.statusText.textContent = `Loading weapon data from ${overrideUrl}...`;
+    setLoading(true, `Loading weapon data from ${overrideUrl}...`);
     const data = await loadWeaponData(overrideUrl);
     state.activeVersionTag = null;
     return data;
@@ -5149,8 +5212,7 @@ async function loadWeaponDataset() {
     const session = loadSessionState();
     const versionTag = resolveInitialVersionTag(session);
     renderVersionSelect(versionTag);
-    elements.statusText.textContent = `Loading weapon data (${versionTag})...`;
-    setVersionSelectBusy(true);
+    setLoading(true, `Loading weapon data (${versionTag})...`);
     const data = await loadWeaponDataForVersion(versionTag);
     state.activeVersionTag = versionTag;
     return data;
@@ -5159,7 +5221,7 @@ async function loadWeaponDataset() {
   weaponHistoryEnabled = false;
   hideVersionSelect();
   const fallbackUrl = resolveWeaponDataUrl();
-  elements.statusText.textContent = `Loading weapon data from ${fallbackUrl}...`;
+  setLoading(true, `Loading weapon data from ${fallbackUrl}...`);
   const data = await loadWeaponData(fallbackUrl);
   state.activeVersionTag = null;
   return data;
@@ -5169,8 +5231,7 @@ async function reloadWeaponVersion(tag) {
   if (!weaponHistoryEnabled || !weaponHistoryManifest) return;
 
   const preserved = snapshotCurrentState();
-  setVersionSelectBusy(true);
-  elements.statusText.textContent = `Loading weapon data (${tag})...`;
+  setLoading(true, `Loading weapon data (${tag})...`);
 
   try {
     const data = await loadWeaponDataForVersion(tag);
@@ -5190,12 +5251,13 @@ async function reloadWeaponVersion(tag) {
       elements.versionSelect.value = state.activeVersionTag || weaponHistoryManifest.latestTag;
     }
   } finally {
-    setVersionSelectBusy(false);
+    setLoading(false);
   }
 }
 
 async function init() {
   reportMissingElements();
+  initTheme();
   wireEvents();
   if (!elements.statusText) {
     console.error("[viewer] Cannot start without #statusText.");
@@ -5203,8 +5265,9 @@ async function init() {
   }
 
   try {
+    setLoading(true, "Loading weapon data...");
     const data = await loadWeaponDataset();
-    elements.statusText.textContent = "Flattening weapon records...";
+    setLoading(true, "Flattening weapon records...");
     rebuildWeaponRowsFromData(data);
     state.filteredRows = [...state.rows];
 
@@ -5239,12 +5302,14 @@ async function init() {
       elements.statusText.textContent = `Loaded ${state.rows.length} weapons from ${state.activeVersionTag}.`;
     }
 
-    setVersionSelectBusy(false);
+    setLoading(false);
     saveSessionState();
   } catch (error) {
     console.error(error);
-    elements.statusText.textContent = "Failed to load weapon data. Run locally with a web server (not file://).";
-    setVersionSelectBusy(false);
+    setLoading(false);
+    if (elements.statusText) {
+      elements.statusText.textContent = "Failed to load weapon data. Run locally with a web server (not file://).";
+    }
   }
 }
 
