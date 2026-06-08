@@ -3748,14 +3748,14 @@ function renamePreset(oldName, newName) {
 
 function deletePresetByName(name) {
   if (isDefaultPreset(name) || !state.presets[name]) return;
+  const wasSelected = elements.presetSelect?.value === name;
   delete state.presets[name];
   savePresets();
-  if (elements.presetSelect.value === name) {
-    state.activePresetName = DEFAULT_PRESET_NAME;
-    applyDefaultPreset();
+  if (wasSelected) {
     renderPresetOptions(DEFAULT_PRESET_NAME);
+    saveSessionState();
   } else {
-    renderPresetOptions(elements.presetSelect.value);
+    renderPresetOptions(elements.presetSelect?.value || DEFAULT_PRESET_NAME);
   }
   renderPresetManageTable();
 }
@@ -4028,12 +4028,12 @@ function renameFilterPreset(oldName, newName) {
 
 function deleteFilterPresetByName(name) {
   if (isDefaultFilterPreset(name) || !state.filterPresets[name]) return;
+  const wasSelected = elements.filterPresetSelect?.value === name;
   delete state.filterPresets[name];
   saveFilterPresets();
-  if (elements.filterPresetSelect?.value === name) {
-    state.activeFilterPresetName = DEFAULT_FILTER_PRESET_NAME;
-    applyDefaultFilterPreset();
+  if (wasSelected) {
     renderFilterPresetOptions(DEFAULT_FILTER_PRESET_NAME);
+    saveSessionState();
   } else {
     renderFilterPresetOptions(elements.filterPresetSelect?.value || DEFAULT_FILTER_PRESET_NAME);
   }
@@ -4302,12 +4302,12 @@ function renameCalcPreset(oldName, newName) {
 
 function deleteCalcPresetByName(name) {
   if (isDefaultCalcPreset(name) || !state.calcPresets[name]) return;
+  const wasSelected = elements.calcPresetSelect?.value === name;
   delete state.calcPresets[name];
   saveCalcPresets();
-  if (elements.calcPresetSelect?.value === name) {
-    state.activeCalcPresetName = DEFAULT_CALC_PRESET_NAME;
-    applyDefaultCalcPreset();
+  if (wasSelected) {
     renderCalcPresetOptions(DEFAULT_CALC_PRESET_NAME);
+    saveSessionState();
   } else {
     renderCalcPresetOptions(elements.calcPresetSelect?.value || DEFAULT_CALC_PRESET_NAME);
   }
